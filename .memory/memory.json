@@ -1,0 +1,14 @@
+{"type":"entity","entityType":"Project","name":"Demo项目","observations":["全栈项目，包含前端和后端","前端使用 React + TypeScript + Vite","后端使用 Express.js + TypeScript","数据库使用 Supabase (PostgreSQL)","样式方案使用 Tailwind CSS + Radix UI"],"createdAt":"2026-04-12T03:22:16.199Z","version":1}
+{"type":"entity","entityType":"Technology","name":"React","observations":["前端 UI 框架","版本 18","用于构建用户界面"],"createdAt":"2026-04-12T03:22:16.199Z","version":1}
+{"type":"entity","entityType":"Technology","name":"TypeScript","observations":["类型安全的 JavaScript 超集","版本 5.x","前后端都使用"],"createdAt":"2026-04-12T03:22:16.199Z","version":1}
+{"type":"entity","entityType":"Technology","name":"Supabase","observations":["开源的 Firebase 替代方案","基于 PostgreSQL","提供认证、数据库、存储等功能","支持 Row Level Security"],"createdAt":"2026-04-12T03:22:16.199Z","version":1}
+{"type":"entity","entityType":"Technology","name":"Express.js","observations":["Node.js Web 框架","版本 4.x","用于构建 REST API"],"createdAt":"2026-04-12T03:22:16.199Z","version":1}
+{"type":"entity","entityType":"Preference","name":"用户偏好-知识记录","observations":["对话中描述的需求场景需要记录到知识图谱","记录内容包括：功能需求、业务规则、技术决策、问题解决方案"],"createdAt":"2026-04-12T03:26:45.624Z","version":1}
+{"type":"entity","entityType":"Rule","name":"知识记录规则","observations":["触发条件：用户描述需求场景时","执行动作：将需求信息存储到知识图谱","存储格式：实体 + 观察记录","目的：跨会话保留上下文，避免重复询问"],"createdAt":"2026-04-12T03:26:45.624Z","version":1}
+{"type":"relation","from":"Demo项目","relationType":"使用","to":"React","createdAt":"2026-04-12T03:22:31.821Z","version":1}
+{"type":"relation","from":"Demo项目","relationType":"使用","to":"TypeScript","createdAt":"2026-04-12T03:22:31.821Z","version":1}
+{"type":"relation","from":"Demo项目","relationType":"使用","to":"Supabase","createdAt":"2026-04-12T03:22:31.821Z","version":1}
+{"type":"relation","from":"Demo项目","relationType":"使用","to":"Express.js","createdAt":"2026-04-12T03:22:31.821Z","version":1}
+{"type":"relation","from":"React","relationType":"配合使用","to":"TypeScript","createdAt":"2026-04-12T03:22:31.821Z","version":1}
+{"type":"relation","from":"Demo项目","relationType":"关联偏好","to":"用户偏好-知识记录","createdAt":"2026-04-12T03:26:46.978Z","version":1}
+{"type":"relation","from":"用户偏好-知识记录","relationType":"遵循规则","to":"知识记录规则","createdAt":"2026-04-12T03:26:46.978Z","version":1}

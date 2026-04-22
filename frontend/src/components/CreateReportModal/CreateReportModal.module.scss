@@ -1,0 +1,171 @@
+.modal {
+  :global {
+    .ant-modal-header {
+      border-bottom: 1px solid #f0f0f0;
+      padding: 16px 24px;
+    }
+    
+    .ant-modal-body {
+      padding: 24px;
+    }
+  }
+}
+
+.steps {
+  margin-bottom: 32px;
+}
+
+.stepContent {
+  min-height: 300px;
+}
+
+.formItem {
+  margin-bottom: 20px;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+  margin-bottom: 8px;
+}
+
+.required {
+  color: #ef4444;
+  margin-left: 2px;
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+}
+
+.textarea {
+  resize: none;
+}
+
+.templateInfo {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.systemInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.systemLabel {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.systemValue {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.templateOptions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.templateCard {
+  cursor: pointer;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    border-color: #155dfc;
+    box-shadow: 0 4px 12px rgba(21, 93, 252, 0.1);
+  }
+  
+  &.selected {
+    border-color: #155dfc;
+    background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
+    
+    .cardIcon {
+      color: #155dfc;
+    }
+  }
+  
+  :global {
+    .ant-card-body {
+      padding: 20px;
+    }
+  }
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.cardIcon {
+  font-size: 20px;
+  color: #6b7280;
+}
+
+.cardTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.cardDesc {
+  font-size: 13px;
+  color: #6b7280;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.panelList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panelItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.panelDot {
+  color: #155dfc;
+  font-weight: bold;
+}
+
+.fixedTag {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #155dfc;
+  background: #eff6ff;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+.customHint {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid #f0f0f0;
+}
