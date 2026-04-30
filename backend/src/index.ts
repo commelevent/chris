@@ -4,7 +4,7 @@ import cors from 'cors';
 import { Resolver, setDefaultResultOrder } from 'node:dns';
 import { setGlobalDispatcher, Agent } from 'undici';
 import apiRouter from './routes/api';
-import { initDatabase, getSupabase, isDatabaseConnected, setUseSupabaseEnabled } from './database/supabase';
+import { initDatabase, getSupabase, isDatabaseConnected, setUseSupabaseEnabled, setConnectionFailed } from './database/supabase';
 
 setDefaultResultOrder('ipv4first');
 const resolver = new Resolver();
@@ -57,8 +57,18 @@ async function insertAllSystemsData() {
       .from('business_systems')
       .select('id, name, code');
 
-    if (bsError || !businessSystems) {
-      console.log('获取业务系统失败:', bsError?.message);
+    if (bsError) {
+      if (bsError.message.includes('ENOTFOUND') || bsError.message.includes('fetch failed')) {
+        console.log('网络不可用，跳过数据插入');
+        setConnectionFailed();
+        return;
+      }
+      console.log('获取业务系统失败:', bsError.message);
+      return;
+    }
+    
+    if (!businessSystems || businessSystems.length === 0) {
+      console.log('未找到业务系统，跳过数据插入');
       return;
     }
 
@@ -338,14 +348,14 @@ async function insertAllSystemsData() {
 
 const startServer = async () => {
   try {
-    await initDatabase();
+    initDatabase().catch(err => console.error('Database init error:', err));
     
     setUseSupabaseEnabled(true);
     
-    await insertAllSystemsData();
+    insertAllSystemsData().catch(err => console.error('Background data insert error:', err));
     
-    app.listen(PORT, '127.0.0.1', () => {
-      console.log(`Server is running on http://127.0.0.1:${PORT}`);
+    app.listen(PORT, () => {
+      console.log(`Server is running on http://localhost:${PORT}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

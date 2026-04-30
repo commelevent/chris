@@ -129,6 +129,16 @@
   border-radius: 4px;
 }
 
+.hiddenBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #e5e7eb;
+  border-radius: 4px;
+}
+
 .chatPanel {
   width: 420px;
   border-left: 1px solid #e5e7eb;

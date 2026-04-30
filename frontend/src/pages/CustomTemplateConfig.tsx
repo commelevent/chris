@@ -18,6 +18,7 @@ interface PanelConfig {
     params: Record<string, any>;
   };
   fixed?: boolean;
+  hidden?: boolean;
 }
 
 interface CreateReportData {
@@ -177,6 +178,7 @@ const CustomTemplateConfig: React.FC = () => {
     }
     return [];
   });
+  const [hiddenPanelIds, setHiddenPanelIds] = useState<Set<string>>(new Set());
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isAiTyping, setIsAiTyping] = useState(false);
@@ -188,6 +190,10 @@ const CustomTemplateConfig: React.FC = () => {
   const allPanels = useMemo(() => {
     return [...fixedPanels, ...customPanels];
   }, [customPanels, fixedPanels]);
+
+  const visiblePanels = useMemo(() => {
+    return allPanels.filter(p => !hiddenPanelIds.has(p.id));
+  }, [allPanels, hiddenPanelIds]);
 
   useEffect(() => {
     const welcomeMessage = templateType === 'default' 
@@ -270,6 +276,20 @@ const CustomTemplateConfig: React.FC = () => {
     }
     message.success('面板已删除');
   }, [customPanels, selectedPanelId]);
+
+  const handleToggleHidden = useCallback((panelId: string) => {
+    setHiddenPanelIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(panelId)) {
+        newSet.delete(panelId);
+        message.success('面板已显示');
+      } else {
+        newSet.add(panelId);
+        message.success('面板已隐藏');
+      }
+      return newSet;
+    });
+  }, []);
 
   const handleUpdatePanelTitle = useCallback((panelId: string, newTitle: string) => {
     setCustomPanels(prev => prev.map(p => 
@@ -391,6 +411,7 @@ const CustomTemplateConfig: React.FC = () => {
         title: panel.title,
         description: panel.description,
         datasource: panel.datasource,
+        hidden: hiddenPanelIds.has(panel.id),
         gridPos: { x: 0, y: index * 8, w: 24, h: 8 }
       }));
 
@@ -462,7 +483,7 @@ const CustomTemplateConfig: React.FC = () => {
         </div>
         <div className={styles.headerRight}>
           <span className={styles.panelCount}>
-            共 {allPanels.length} 个面板
+            共 {allPanels.length} 个面板 · {visiblePanels.length} 个显示
           </span>
           <Button
             type="primary"
@@ -484,6 +505,7 @@ const CustomTemplateConfig: React.FC = () => {
           <div className={styles.panelsContainer}>
             {allPanels.map((panel, index) => {
               const isFixed = !!panel.fixed;
+              const isHidden = hiddenPanelIds.has(panel.id);
               const numeral = chineseNumerals[index] || String(index + 1);
               
               return (
@@ -494,9 +516,11 @@ const CustomTemplateConfig: React.FC = () => {
                   subtitle={panel.description}
                   isConfigMode={true}
                   isFixed={isFixed}
+                  isHidden={isHidden}
                   isSelected={selectedPanelId === panel.id}
                   onSelect={handlePanelSelect}
                   onDelete={isFixed ? undefined : handleDeletePanel}
+                  onToggleHidden={isFixed ? handleToggleHidden : undefined}
                 >
                   <div className={styles.panelPlaceholder}>
                     <div className={styles.placeholderIcon}>
@@ -509,6 +533,7 @@ const CustomTemplateConfig: React.FC = () => {
                     <div className={styles.placeholderText}>
                       {panel.title}
                       {isFixed && <span className={styles.fixedBadge}>固定</span>}
+                      {isHidden && <span className={styles.hiddenBadge}>已隐藏</span>}
                     </div>
                   </div>
                 </DraggableSection>

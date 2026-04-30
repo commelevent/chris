@@ -164,6 +164,48 @@
   }
 }
 
+.toggleHiddenButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: #bfbfbf;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+  border-radius: 4px;
+
+  &:hover {
+    color: #1890ff;
+    background: #e6f7ff;
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+.hiddenBadge {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  color: #6b7280;
+  margin-left: 8px;
+}
+
+.hidden {
+  opacity: 0.5;
+  
+  .configMode & {
+    background: #fafafa;
+    border-style: dashed;
+  }
+}
+
 .content {
   display: flex;
   flex-direction: column;

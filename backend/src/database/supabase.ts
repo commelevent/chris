@@ -59,19 +59,19 @@ export const initDatabase = async () => {
     return;
   }
   
-  console.log('Testing database connection (30s timeout)...');
+  console.log('Testing database connection (10s timeout)...');
   
   try {
     const timeoutPromise = new Promise<null>((_, reject) => {
-      setTimeout(() => reject(new Error('Connection timeout')), 30000);
+      setTimeout(() => reject(new Error('Connection timeout')), 10000);
     });
     
     const queryPromise = supabase.from('clusters').select('*', { count: 'exact', head: true });
     
-    const result = await Promise.race([queryPromise, timeoutPromise.then(() => null)]);
+    const result = await Promise.race([queryPromise, timeoutPromise]);
     
-    if (result === null) {
-      console.error('Database connection timeout');
+    if (!result) {
+      console.error('Database connection timeout, using mock data');
       connectionFailed = true;
       return;
     }
@@ -80,6 +80,7 @@ export const initDatabase = async () => {
     
     if (error) {
       console.error('Database connection error:', error.message);
+      console.log('Falling back to mock data mode');
       connectionFailed = true;
     } else {
       console.log(`Database connected successfully! Clusters count: ${count}`);
@@ -87,7 +88,13 @@ export const initDatabase = async () => {
       console.log('Data source automatically enabled: Supabase');
     }
   } catch (err: any) {
-    console.error('Database initialization error:', err?.message || err);
+    const errorMsg = err?.message || err;
+    if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('ECONNREFUSED') || errorMsg.includes('fetch failed')) {
+      console.error('Network error: Cannot reach Supabase server');
+      console.log('Falling back to mock data mode');
+    } else {
+      console.error('Database initialization error:', errorMsg);
+    }
     connectionFailed = true;
   }
 };

@@ -111,7 +111,11 @@ const renderPanel = (
   panel: GrafanaPanel,
   date: string,
   systemId: string,
-  onStatusChange?: (status: 'normal' | 'warning' | 'critical' | null) => void
+  onStatusChange?: (status: 'normal' | 'warning' | 'critical' | null) => void,
+  isConfigMode?: boolean,
+  deletedTabs?: Set<string>,
+  onDeleteTab?: (tabId: string) => void,
+  isDeaggregated?: boolean
 ): React.ReactNode => {
   const datasource = resolveDatasource(panel.datasource, date, systemId);
   const reportId = `${systemId}-${date}`;
@@ -142,6 +146,10 @@ const renderPanel = (
           date={date}
           systemId={systemId}
           datasource={datasource}
+          isConfigMode={isConfigMode}
+          deletedTabs={deletedTabs}
+          onDeleteTab={onDeleteTab}
+          isDeaggregated={isDeaggregated}
         />
       );
     
@@ -228,6 +236,9 @@ const ReportDetail: React.FC = () => {
   const [modificationHistory, setModificationHistory] = useState<Array<{ pendingModifications: Record<string, Record<string, any>> }>>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isGLM5Enabled, setIsGLM5Enabled] = useState(true);
+  const [hiddenPanelIds, setHiddenPanelIds] = useState<Set<string>>(new Set());
+  const [deletedPanelTabs, setDeletedPanelTabs] = useState<Record<string, Set<string>>>({});
+  const [deaggregatedPanels, setDeaggregatedPanels] = useState<Set<string>>(new Set());
   const isLoadingRef = React.useRef(false);
   const hasUnsavedChangesRef = React.useRef(false);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
@@ -362,6 +373,10 @@ const ReportDetail: React.FC = () => {
         .filter(Boolean) as GrafanaPanel[];
     }
 
+    if (!isConfigMode) {
+      orderedPanels = orderedPanels.filter(panel => !hiddenPanelIds.has(panel.id));
+    }
+
     const modifiedPanels = orderedPanels.map(panel => {
       const savedMods = panelModifications[panel.id];
       const pendingMods = pendingModifications[panel.id];
@@ -407,7 +422,7 @@ const ReportDetail: React.FC = () => {
     });
 
     return modifiedPanels;
-  }, [system, panelOrder, panelModifications, pendingModifications, deletedPanels]);
+  }, [system, panelOrder, panelModifications, pendingModifications, deletedPanels, hiddenPanelIds, isConfigMode]);
 
   const getPanelTitle = useCallback((panelId: string): string => {
     if (!panels) {
@@ -449,6 +464,61 @@ const ReportDetail: React.FC = () => {
     
     message.success('面板已删除（临时修改，需保存生效）');
   }, [panelOrder, deletedPanels]);
+
+  const handleToggleHidden = useCallback((panelId: string) => {
+    setHiddenPanelIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(panelId)) {
+        newSet.delete(panelId);
+        message.success('面板已显示');
+      } else {
+        newSet.add(panelId);
+        message.success('面板已隐藏');
+      }
+      hasUnsavedChangesRef.current = true;
+      return newSet;
+    });
+  }, []);
+
+  const handleDeletePanelTab = useCallback((panelId: string, tabId: string) => {
+    console.log('[handleDeletePanelTab] 删除面板 tab:', panelId, tabId);
+    
+    const TAB_CONFIG = [
+      { id: 'wx', label: '威新中心' },
+      { id: 'nf', label: '南方中心' },
+    ];
+    
+    const currentDeletedTabs = deletedPanelTabs[panelId] || new Set();
+    const availableTabs = TAB_CONFIG.filter(tab => !currentDeletedTabs.has(tab.id));
+    
+    if (availableTabs.length === 1 && availableTabs[0].id === tabId) {
+      setDeaggregatedPanels(prev => {
+        const newSet = new Set(prev);
+        newSet.add(panelId);
+        return newSet;
+      });
+      hasUnsavedChangesRef.current = true;
+      message.success('表格已解聚合（临时修改，需保存生效）');
+      return;
+    }
+    
+    setDeletedPanelTabs(prev => {
+      const currentTabs = prev[panelId] || new Set();
+      const newTabs = new Set(currentTabs);
+      newTabs.add(tabId);
+      
+      const result = {
+        ...prev,
+        [panelId]: newTabs,
+      };
+      
+      console.log('[handleDeletePanelTab] 更新后的 deletedPanelTabs:', result);
+      return result;
+    });
+    
+    hasUnsavedChangesRef.current = true;
+    message.success('表格已删除（临时修改，需保存生效）');
+  }, [deletedPanelTabs]);
 
   const handleUpdatePanelTitle = useCallback((panelId: string, newTitle: string) => {
     console.log('[handleUpdatePanelTitle] 修改面板标题:', panelId, '->', newTitle);
@@ -673,36 +743,60 @@ const ReportDetail: React.FC = () => {
       'assessment': 'panel-assessment-action',
     };
     
-    const savedTemplate = localStorage.getItem(`report-template-${systemId}`);
-    
-    if (savedTemplate) {
+    const loadTemplate = async () => {
       try {
-        const template = JSON.parse(savedTemplate);
-        if (template.panelOrder) {
-          const convertedPanelOrder = template.panelOrder.map((id: string) => oldToNewIdMap[id] || id);
-          console.log('[loadTemplate] Converted panelOrder:', template.panelOrder, '->', convertedPanelOrder);
-          setPanelOrder(convertedPanelOrder);
+        const response = await fetch(`/api/report-templates/${systemId}`);
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+          const template = result.data;
+          if (template.panelOrder) {
+            const convertedPanelOrder = template.panelOrder.map((id: string) => oldToNewIdMap[id] || id);
+            console.log('[loadTemplate] Converted panelOrder:', template.panelOrder, '->', convertedPanelOrder);
+            setPanelOrder(convertedPanelOrder);
+          }
+          if (template.deletedPanels) {
+            const convertedDeletedPanels = template.deletedPanels.map((id: string) => oldToNewIdMap[id] || id);
+            console.log('[loadTemplate] Converted deletedPanels:', template.deletedPanels, '->', convertedDeletedPanels);
+            setDeletedPanels(new Set(convertedDeletedPanels));
+          }
+          if (template.hiddenPanelIds) {
+            const convertedHiddenPanelIds = template.hiddenPanelIds.map((id: string) => oldToNewIdMap[id] || id);
+            console.log('[loadTemplate] Converted hiddenPanelIds:', template.hiddenPanelIds, '->', convertedHiddenPanelIds);
+            setHiddenPanelIds(new Set(convertedHiddenPanelIds));
+          }
+          if (template.panelModifications) {
+            console.log('[loadTemplate] Loaded panelModifications:', template.panelModifications);
+            setPanelModifications(template.panelModifications);
+          }
+          if (template.deletedPanelTabs) {
+            const restored: Record<string, Set<string>> = {};
+            for (const [panelId, tabs] of Object.entries(template.deletedPanelTabs)) {
+              const convertedPanelId = oldToNewIdMap[panelId] || panelId;
+              restored[convertedPanelId] = new Set(tabs as string[]);
+            }
+            console.log('[loadTemplate] Loaded deletedPanelTabs:', restored);
+            setDeletedPanelTabs(restored);
+          }
+          if (template.deaggregatedPanels) {
+            const convertedDeaggregatedPanels = template.deaggregatedPanels.map((id: string) => oldToNewIdMap[id] || id);
+            console.log('[loadTemplate] Loaded deaggregatedPanels:', convertedDeaggregatedPanels);
+            setDeaggregatedPanels(new Set(convertedDeaggregatedPanels));
+          }
+          return;
         }
-        if (template.deletedPanels) {
-          const convertedDeletedPanels = template.deletedPanels.map((id: string) => oldToNewIdMap[id] || id);
-          console.log('[loadTemplate] Converted deletedPanels:', template.deletedPanels, '->', convertedDeletedPanels);
-          setDeletedPanels(new Set(convertedDeletedPanels));
-        }
-        if (template.panelModifications) {
-          console.log('[loadTemplate] Loaded panelModifications:', template.panelModifications);
-          setPanelModifications(template.panelModifications);
-        }
-        return;
       } catch (e) {
-        console.error('Failed to load saved template:', e);
+        console.error('Failed to load saved template from database:', e);
       }
-    }
+      
+      if (system?.datasource_reference?.panels && panelOrder.length === 0) {
+        setPanelOrder(system.datasource_reference.panels.map(p => p.id));
+      } else if (!system?.datasource_reference?.panels && panelOrder.length === 0) {
+        setPanelOrder(DEFAULT_PANEL_IDS);
+      }
+    };
     
-    if (system?.datasource_reference?.panels && panelOrder.length === 0) {
-      setPanelOrder(system.datasource_reference.panels.map(p => p.id));
-    } else if (!system?.datasource_reference?.panels && panelOrder.length === 0) {
-      setPanelOrder(DEFAULT_PANEL_IDS);
-    }
+    loadTemplate();
   }, [system, systemId, panelOrder.length]);
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -880,7 +974,7 @@ const ReportDetail: React.FC = () => {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const mergedModifications = { ...panelModifications };
     
     for (const [panelId, mods] of Object.entries(pendingModifications)) {
@@ -895,17 +989,42 @@ const ReportDetail: React.FC = () => {
     setModificationHistory([]);
     setOperationHistory([]);
     
+    const serializedDeletedPanelTabs: Record<string, string[]> = {};
+    for (const [panelId, tabs] of Object.entries(deletedPanelTabs)) {
+      serializedDeletedPanelTabs[panelId] = Array.from(tabs);
+    }
+    
     const template = {
       panelOrder,
       deletedPanels: Array.from(deletedPanels),
+      hiddenPanelIds: Array.from(hiddenPanelIds),
       panelModifications: mergedModifications,
-      savedAt: new Date().toISOString(),
+      deletedPanelTabs: serializedDeletedPanelTabs,
+      deaggregatedPanels: Array.from(deaggregatedPanels),
     };
     
-    localStorage.setItem(`report-template-${systemId}`, JSON.stringify(template));
-    hasUnsavedChangesRef.current = false;
-    message.success('模板保存成功，所有修改已生效');
-    setIsConfigMode(false);
+    try {
+      const response = await fetch(`/api/report-templates/${systemId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(template),
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        hasUnsavedChangesRef.current = false;
+        message.success('模板保存成功，所有修改已永久生效');
+        setIsConfigMode(false);
+      } else {
+        message.error(result.error || '模板保存失败');
+      }
+    } catch (error) {
+      console.error('Save template error:', error);
+      message.error('模板保存失败，请稍后重试');
+    }
   };
 
   const handleFullscreen = () => {
@@ -940,32 +1059,59 @@ const ReportDetail: React.FC = () => {
     message.success('已撤销上一步操作');
   };
   
-  const handleReset = () => {
-    const savedTemplate = localStorage.getItem(`report-template-${systemId}`);
-    
-    if (savedTemplate) {
-      try {
-        const template = JSON.parse(savedTemplate);
+  const handleReset = async () => {
+    try {
+      const response = await fetch(`/api/report-templates/${systemId}`);
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        const template = result.data;
         if (template.panelOrder) {
           setPanelOrder(template.panelOrder);
         }
         if (template.deletedPanels) {
           setDeletedPanels(new Set(template.deletedPanels));
         }
+        if (template.hiddenPanelIds) {
+          setHiddenPanelIds(new Set(template.hiddenPanelIds));
+        }
         if (template.panelModifications) {
           setPanelModifications(template.panelModifications);
         }
-      } catch (e) {
-        console.error('Failed to reset template:', e);
+        if (template.deletedPanelTabs) {
+          const restored: Record<string, Set<string>> = {};
+          for (const [panelId, tabs] of Object.entries(template.deletedPanelTabs)) {
+            restored[panelId] = new Set(tabs as string[]);
+          }
+          setDeletedPanelTabs(restored);
+        }
+        if (template.deaggregatedPanels) {
+          setDeaggregatedPanels(new Set(template.deaggregatedPanels));
+        }
+      } else {
+        if (system?.datasource_reference?.panels) {
+          setPanelOrder(system.datasource_reference.panels.map(p => p.id));
+        } else {
+          setPanelOrder(DEFAULT_PANEL_IDS);
+        }
+        setDeletedPanels(new Set());
+        setHiddenPanelIds(new Set());
+        setPanelModifications({});
+        setDeletedPanelTabs({});
+        setDeaggregatedPanels(new Set());
       }
-    } else {
+    } catch (e) {
+      console.error('Failed to reset template:', e);
       if (system?.datasource_reference?.panels) {
         setPanelOrder(system.datasource_reference.panels.map(p => p.id));
       } else {
         setPanelOrder(DEFAULT_PANEL_IDS);
       }
       setDeletedPanels(new Set());
+      setHiddenPanelIds(new Set());
       setPanelModifications({});
+      setDeletedPanelTabs({});
+      setDeaggregatedPanels(new Set());
     }
     
     setPendingModifications({});
@@ -1004,8 +1150,8 @@ const ReportDetail: React.FC = () => {
         ? panelOrder.map(id => {
             const newId = oldToNewIdMap[id] || id;
             return { id: newId, ...defaultPanelsMap[newId as keyof typeof defaultPanelsMap] };
-          }).filter(p => p.title && !deletedPanels.has(p.id))
-        : DEFAULT_PANEL_IDS.map(id => ({ id, ...defaultPanelsMap[id as keyof typeof defaultPanelsMap] })).filter(p => !deletedPanels.has(p.id));
+          }).filter(p => p.title && !deletedPanels.has(p.id) && (isConfigMode || !hiddenPanelIds.has(p.id)))
+        : DEFAULT_PANEL_IDS.map(id => ({ id, ...defaultPanelsMap[id as keyof typeof defaultPanelsMap] })).filter(p => !deletedPanels.has(p.id) && (isConfigMode || !hiddenPanelIds.has(p.id)));
 
       console.log('[renderDynamicPanels] Final orderedPanels:', orderedPanels);
 
@@ -1024,6 +1170,7 @@ const ReportDetail: React.FC = () => {
             >
               {orderedPanels.map((panel, index) => {
                 const isFixed = index === 0 || index === orderedPanels.length - 1;
+                const isHidden = hiddenPanelIds.has(panel.id);
                 const numeral = chineseNumerals[index] || String(index + 1);
                 const title = `${numeral}、${panel.title}`;
                 return (
@@ -1034,9 +1181,11 @@ const ReportDetail: React.FC = () => {
                     subtitle={panel.subtitle}
                     isConfigMode={isConfigMode}
                     isFixed={isFixed}
+                    isHidden={isHidden}
                     isSelected={selectedPanelId === panel.id}
                     onSelect={handlePanelSelect}
                     onDelete={handleDeletePanel}
+                    onToggleHidden={isFixed ? handleToggleHidden : undefined}
                   >
                     {panel.component}
                   </DraggableSection>
@@ -1090,8 +1239,25 @@ const ReportDetail: React.FC = () => {
           >
             {filteredPanels.map((panel, index) => {
               const { title, subtitle } = getPanelTitles(panel, index);
-              const panelContent = renderPanel(panel, selectedDate, effectiveSystemId, handleStatusChange);
+              const panelDeletedTabs = deletedPanelTabs[panel.id] || new Set();
+              const isPanelDeaggregated = deaggregatedPanels.has(panel.id);
+              const panelContent = renderPanel(
+                panel, 
+                selectedDate, 
+                effectiveSystemId, 
+                handleStatusChange,
+                isConfigMode,
+                panelDeletedTabs,
+                (tabId) => handleDeletePanelTab(panel.id, tabId),
+                isPanelDeaggregated
+              );
               const isFixed = index === 0 || index === filteredPanels.length - 1;
+              const isHidden = hiddenPanelIds.has(panel.id);
+              const mergedMods = { ...panelModifications[panel.id], ...pendingModifications[panel.id] };
+              const customStyles = {
+                ...panel.fieldConfig?.defaults?.custom,
+                ...mergedMods?.styles,
+              };
               
               if (!panelContent) return null;
               
@@ -1103,10 +1269,12 @@ const ReportDetail: React.FC = () => {
                   subtitle={subtitle}
                   isConfigMode={isConfigMode}
                   isFixed={isFixed}
+                  isHidden={isHidden}
                   isSelected={selectedPanelId === panel.id}
                   onSelect={handlePanelSelect}
                   onDelete={handleDeletePanel}
-                  customStyles={panel.fieldConfig?.defaults?.custom}
+                  onToggleHidden={isFixed ? handleToggleHidden : undefined}
+                  customStyles={customStyles}
                 >
                   {panelContent}
                 </DraggableSection>
@@ -1119,8 +1287,24 @@ const ReportDetail: React.FC = () => {
 
     return filteredPanels.map((panel, index) => {
       const { title, subtitle } = getPanelTitles(panel, index);
-      const panelContent = renderPanel(panel, selectedDate, effectiveSystemId, handleStatusChange);
+      const panelDeletedTabs = deletedPanelTabs[panel.id] || new Set();
+      const isPanelDeaggregated = deaggregatedPanels.has(panel.id);
+      const panelContent = renderPanel(
+        panel, 
+        selectedDate, 
+        effectiveSystemId, 
+        handleStatusChange,
+        isConfigMode,
+        panelDeletedTabs,
+        (tabId) => handleDeletePanelTab(panel.id, tabId),
+        isPanelDeaggregated
+      );
       const isFixed = index === 0 || index === filteredPanels.length - 1;
+      const mergedMods = { ...panelModifications[panel.id], ...pendingModifications[panel.id] };
+      const customStyles = {
+        ...panel.fieldConfig?.defaults?.custom,
+        ...mergedMods?.styles,
+      };
       
       if (!panelContent) return null;
       
@@ -1135,7 +1319,7 @@ const ReportDetail: React.FC = () => {
           isSelected={selectedPanelId === panel.id}
           onSelect={handlePanelSelect}
           onDelete={handleDeletePanel}
-          customStyles={panel.fieldConfig?.defaults?.custom}
+          customStyles={customStyles}
         >
           {panelContent}
         </DraggableSection>

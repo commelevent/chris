@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getSupabase } from '../database/supabase';
 
 const GLM_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
 const GLM_API_KEY = process.env.GLM_API_KEY || '';
@@ -82,6 +83,126 @@ export interface AIResponse {
   code?: string;
 }
 
+export interface NetworkMetric {
+  id: string;
+  report_date: string;
+  node_type: string;
+  metric_type: string;
+  metric_category: string;
+  metric_name: string;
+  current_value: number;
+  unit: string;
+  yoy_change: number;
+  mom_change: number;
+  historical_peak: number;
+  threshold_warning: number | null;
+  threshold_critical: number | null;
+  carrier: string | null;
+  insight: string | null;
+  created_at: string;
+}
+
+export interface NetworkMetricsStats {
+  total_metrics: number;
+  node_types: string[];
+}
+
+async function fetchNetworkMetrics(params: {
+  date?: string;
+  nodeType?: string;
+  metricCategory?: string;
+} = {}): Promise<NetworkMetric[]> {
+  try {
+    const supabase = getSupabase();
+    if (!supabase) {
+      console.log('[GLM Service] Supabase client not available');
+      return [];
+    }
+
+    let query = supabase.from('network_metrics').select('*').eq('report_date', '2026-04-24');
+
+    if (params.date) {
+      query = query.eq('report_date', params.date);
+    }
+    if (params.nodeType) {
+      query = query.eq('node_type', params.nodeType);
+    }
+    if (params.metricCategory) {
+      query = query.eq('metric_category', params.metricCategory);
+    }
+
+    const { data, error } = await query.order('report_date', { ascending: false }).order('node_type', { ascending: true });
+
+    if (error) {
+      console.error('[GLM Service] Query error:', error);
+      return [];
+    }
+
+    console.log('[GLM Service] Fetched network metrics:', data?.length || 0, 'records');
+    return (data as NetworkMetric[]) || [];
+  } catch (error) {
+    console.error('[GLM Service] Failed to fetch network metrics:', error);
+    return [];
+  }
+}
+
+async function fetchNetworkMetricsStats(date?: string): Promise<NetworkMetricsStats | null> {
+  try {
+    const supabase = getSupabase();
+    if (!supabase) {
+      console.log('[GLM Service] Supabase client not available');
+      return null;
+    }
+
+    const reportDate = '2026-04-24';
+
+    const { count: total_metrics } = await supabase
+      .from('network_metrics')
+      .select('*', { count: 'exact', head: true })
+      .eq('report_date', reportDate);
+
+    const { data: nodeTypesData } = await supabase
+      .from('network_metrics')
+      .select('node_type')
+      .eq('report_date', reportDate);
+
+    const node_types = Array.from(new Set(nodeTypesData?.map((item: any) => item.node_type) || []));
+
+    console.log('[GLM Service] Fetched network metrics stats:', { total_metrics });
+
+    return {
+      total_metrics: total_metrics || 0,
+      node_types,
+    };
+  } catch (error) {
+    console.error('[GLM Service] Failed to fetch network metrics stats:', error);
+    return null;
+  }
+}
+
+function formatNetworkMetricsForAI(metrics: NetworkMetric[]): string {
+  if (metrics.length === 0) {
+    return '暂无网络指标数据。';
+  }
+  
+  let result = `共找到 ${metrics.length} 条网络指标数据：\n\n`;
+  result += '| 序号 | 节点类型 | 指标类别 | 指标名称 | 当前值 | 单位 | 同比 | 环比 | 历史峰值 |\n';
+  result += '|------|----------|----------|----------|--------|------|------|------|----------|\n';
+  
+  metrics.forEach((m, index) => {
+    result += `| ${index + 1} | ${m.node_type} | ${m.metric_category || '-'} | ${m.metric_name} | ${m.current_value} | ${m.unit} | ${m.yoy_change || 0}% | ${m.mom_change || 0}% | ${m.historical_peak || '-'} |\n`;
+  });
+  
+  return result;
+}
+
+function formatStatsForAI(stats: NetworkMetricsStats): string {
+  return `📊 **网络指标统计概览**
+
+- 总指标数: ${stats.total_metrics}
+- 节点类型: ${stats.node_types.join(', ') || '无'}`;
+}
+
 const SYSTEM_PROMPT = `你是一个专业的报表模板配置助手，帮助用户通过自然语言修改报表模板。
 
 ## 核心能力
@@ -89,6 +210,7 @@ const SYSTEM_PROMPT = `你是一个专业的报表模板配置助手，帮助用
 2. 将需求转换为具体的配置修改操作
 3. 保持配置格式一致，遵循最佳实践
 4. 提供数据源信息和样式调整建议
+5. 查询和展示网络指标数据
 
 ## 支持的修改类型
 
@@ -142,10 +264,34 @@ const SYSTEM_PROMPT = `你是一个专业的报表模板配置助手，帮助用
 用户输入: "添加图表模块" / "新增指标卡" / "添加数据表"
 返回格式: 在回复中明确说明添加的面板类型和位置
 
+### 7. 网络指标查询
+用户输入: "查询网络指标" / "网络指标数据" / "查看网络状态" / "网络监控数据"
+**重要**：当用户询问网络指标相关问题时，必须使用消息中提供的实际网络指标数据！
+返回格式：以表格形式展示网络指标数据，包含以下字段：
+- 序号、节点类型、指标类别、指标名称、当前值、单位、同比、环比、历史峰值
+
+支持的查询条件：
+- 按节点类型：路由器、交换机、防火墙、服务器、负载均衡器等
+- 按指标类别：资源使用率、请求量
+
+示例查询：
+- "查看所有路由器的指标"
+- "查询网络指标数据"
+- "网络指标统计概览"
+
+### 8. 网络指标数据源配置
+用户输入: "数据源改为网络指标数据" / "修改数据源为网络指标"
+**重要**：网络指标数据源只需要 date 参数，不需要 systemId 参数！
+正确格式: /api/network-metrics?date=2026-04-28
+错误格式: /api/network-metrics?date=2026-04-28&systemId=xxx（不要包含systemId）
+
+返回格式: "已将数据源地址修改为 /api/network-metrics?date=报表日期"
+
 ## 回复规则
 - 用简洁的中文回复
 - 明确说明修改了什么
 - 如果用户询问数据源，提供详细的数据源信息
+- 如果用户询问网络指标，使用消息中提供的实际数据
 - 如果用户要求修改样式，提供具体的样式修改建议
 - 如果无法理解需求，询问用户具体要修改什么
 - 如果需要更多信息，引导用户提供
@@ -165,6 +311,56 @@ export async function callGLM5(
       { role: 'system', content: SYSTEM_PROMPT },
       ...conversationHistory,
     ];
+
+    let networkMetricsContext = '';
+    const msg = userMessage.toLowerCase();
+    const isNetworkMetricsQuery = 
+      msg.includes('网络指标') || 
+      msg.includes('网络状态') || 
+      msg.includes('网络监控') ||
+      msg.includes('网络数据') ||
+      msg.includes('指标数据') ||
+      msg.includes('路由器') ||
+      msg.includes('交换机') ||
+      msg.includes('防火墙') ||
+      msg.includes('服务器') ||
+      msg.includes('负载均衡') ||
+      msg.includes('可用性') ||
+      msg.includes('性能指标') ||
+      msg.includes('network_metrics') ||
+      msg.includes('network metrics') ||
+      msg.includes('supabase') ||
+      msg.includes('查找数据') ||
+      msg.includes('查询数据') ||
+      msg.includes('数据库');
+
+    if (isNetworkMetricsQuery) {
+      console.log('[GLM Service] Detected network metrics query, fetching data...');
+      
+      const queryParams: {
+        nodeType?: string;
+        metricCategory?: string;
+      } = {};
+      
+      if (msg.includes('路由器')) queryParams.nodeType = 'router';
+      else if (msg.includes('交换机')) queryParams.nodeType = 'switch';
+      else if (msg.includes('防火墙')) queryParams.nodeType = 'firewall';
+      else if (msg.includes('服务器')) queryParams.nodeType = 'server';
+      else if (msg.includes('负载均衡')) queryParams.nodeType = 'load_balancer';
+      
+      if (msg.includes('可用性')) queryParams.metricCategory = 'availability';
+      else if (msg.includes('性能')) queryParams.metricCategory = 'performance';
+      
+      if (msg.includes('统计') || msg.includes('概览') || msg.includes('总览')) {
+        const stats = await fetchNetworkMetricsStats();
+        if (stats) {
+          networkMetricsContext = `\n\n**网络指标统计数据**：\n${formatStatsForAI(stats)}`;
+        }
+      } else {
+        const metrics = await fetchNetworkMetrics(queryParams);
+        networkMetricsContext = `\n\n**网络指标数据**：\n${formatNetworkMetricsForAI(metrics)}`;
+      }
+    }
 
     if (selectedPanel) {
       let panelInfo = `用户选中了「${selectedPanel.title}」面板（类型：${selectedPanel.type}，ID：${selectedPanel.id}）`;
@@ -218,6 +414,7 @@ export async function callGLM5(
         }
       }
       
+      panelInfo += networkMetricsContext;
       panelInfo += `\n\n用户需求：${userMessage}`;
       panelInfo += `\n\n请根据用户需求修改选中的面板，用简洁的中文说明修改内容。`;
       
@@ -226,9 +423,13 @@ export async function callGLM5(
         content: panelInfo,
       });
     } else {
+      let userContent = userMessage;
+      if (networkMetricsContext) {
+        userContent = `${networkMetricsContext}\n\n用户问题：${userMessage}`;
+      }
       messages.push({
         role: 'user',
-        content: userMessage,
+        content: userContent,
       });
     }
 
@@ -236,7 +437,7 @@ export async function callGLM5(
       model: 'GLM-5',
       messages,
       temperature: 0.7,
-      max_tokens: 2000,
+      max_tokens: 8192,
       stream: false,
     };
 
@@ -312,7 +513,22 @@ function parseModifications(content: string, panelId?: string, panelTitle?: stri
   let endpointMatch: RegExpMatchArray | null = null;
   
   const cleanUrl = (url: string): string => {
-    return url.replace(/^[`「"']+|[`」"']+$/g, '').trim();
+    let cleaned = url.replace(/[`「」"']/g, '').trim();
+    if (cleaned.includes('/api/network-metrics')) {
+      try {
+        const urlObj = new URL(cleaned, 'http://localhost');
+        urlObj.searchParams.delete('systemId');
+        cleaned = urlObj.pathname + (urlObj.search ? urlObj.search : '');
+      } catch {
+        const [path, query] = cleaned.split('?');
+        if (query) {
+          const params = query.split('&').filter(p => !p.startsWith('systemId='));
+          cleaned = params.length > 0 ? `${path}?${params.join('&')}` : path;
+        }
+      }
+    }
+    console.log('[cleanUrl] Input:', url, '-> Output:', cleaned);
+    return cleaned;
   };
   
   if (fullEndpointMatch) {
@@ -366,7 +582,7 @@ function parseModifications(content: string, panelId?: string, panelTitle?: stri
     }
   }
 
-  const deleteMatch = content.match(/已[删除移除]/);
+  const deleteMatch = content.match(/已[删除移除]面板/);
   if (deleteMatch) {
     modifications.push({
       panelId,
@@ -380,11 +596,72 @@ function parseModifications(content: string, panelId?: string, panelTitle?: stri
   return modifications;
 }
 
-function simulateAIResponse(
+async function simulateAIResponse(
   userMessage: string,
   selectedPanel?: SelectedPanelInfo
-): AIResponse {
+): Promise<AIResponse> {
   const msg = userMessage.toLowerCase();
+
+  const isNetworkMetricsQuery = 
+    msg.includes('网络指标') || 
+    msg.includes('网络状态') || 
+    msg.includes('网络监控') ||
+    msg.includes('网络数据') ||
+    msg.includes('指标数据') ||
+    msg.includes('路由器') ||
+    msg.includes('交换机') ||
+    msg.includes('防火墙') ||
+    msg.includes('服务器') ||
+    msg.includes('负载均衡') ||
+    msg.includes('可用性') ||
+    msg.includes('性能指标') ||
+    msg.includes('network_metrics') ||
+    msg.includes('network metrics') ||
+    msg.includes('supabase') ||
+    msg.includes('查找数据') ||
+    msg.includes('查询数据') ||
+    msg.includes('数据库');
+
+  if (isNetworkMetricsQuery) {
+    console.log('[GLM Service] Simulate: Detected network metrics query, fetching data...');
+    
+    const queryParams: {
+      nodeType?: string;
+      metricCategory?: string;
+    } = {};
+    
+    if (msg.includes('路由器')) queryParams.nodeType = 'router';
+    else if (msg.includes('交换机')) queryParams.nodeType = 'switch';
+    else if (msg.includes('防火墙')) queryParams.nodeType = 'firewall';
+    else if (msg.includes('服务器')) queryParams.nodeType = 'server';
+    else if (msg.includes('负载均衡')) queryParams.nodeType = 'load_balancer';
+    
+    if (msg.includes('可用性')) queryParams.metricCategory = 'availability';
+    else if (msg.includes('性能')) queryParams.metricCategory = 'performance';
+    
+    if (msg.includes('统计') || msg.includes('概览') || msg.includes('总览')) {
+      const stats = await fetchNetworkMetricsStats();
+      if (stats) {
+        return {
+          success: true,
+          message: `📊 **网络指标统计概览**\n\n${formatStatsForAI(stats)}\n\n💡 您可以进一步查询具体类型的指标，例如："查看所有路由器的指标"`,
+        };
+      }
+    } else {
+      const metrics = await fetchNetworkMetrics(queryParams);
+      if (metrics.length > 0) {
+        return {
+          success: true,
+          message: `📡 **网络指标查询结果**\n\n${formatNetworkMetricsForAI(metrics)}\n\n💡 您可以进一步筛选，例如："查看路由器的指标"`,
+        };
+      } else {
+        return {
+          success: true,
+          message: `暂无符合条件的网络指标数据。\n\n您可以尝试其他查询条件：\n- 查看所有网络指标\n- 按节点类型查询：路由器、交换机、防火墙、服务器、负载均衡器`,
+        };
+      }
+    }
+  }
 
   if (msg.includes('标题') && selectedPanel) {
     const titleMatch = userMessage.match(/(?:改为|改成|修改为|设为|设置为|叫做)[「"']?([^「"'"」\n]+)/);
@@ -548,7 +825,24 @@ function simulateAIResponse(
       const endpointMatch = userMessage.match(/(?:改为|改成|修改为|设为|设置为)[「"']?([^「"'"」\s\n]+)/);
       const newEndpoint = endpointMatch?.[1]?.trim();
 
-      if (newEndpoint) {
+      if (msg.includes('网络指标') || msg.includes('网络数据')) {
+        const networkEndpoint = '/api/network-metrics';
+        return {
+          success: true,
+          message: `已将「${selectedPanel.title}」的数据源地址修改为「${networkEndpoint}」。`,
+          modifications: [
+            {
+              panelId: selectedPanel.id,
+              field: 'endpoint',
+              oldValue: selectedPanel.datasource?.endpoint,
+              newValue: networkEndpoint,
+              description: `数据源 → ${networkEndpoint}`,
+            },
+          ],
+        };
+      }
+
+      if (newEndpoint && newEndpoint.startsWith('/')) {
         return {
           success: true,
           message: `已将「${selectedPanel.title}」的数据源地址修改为「${newEndpoint}」。`,
@@ -580,7 +874,7 @@ function simulateAIResponse(
     };
   }
 
-  if (msg.includes('样式') || msg.includes('颜色') || msg.includes('背景') || msg.includes('字体') || msg.includes('大小') || msg.includes('宽度') || msg.includes('高度') || msg.includes('边框')) {
+  if (msg.includes('样式') || msg.includes('颜色') || msg.includes('背景') || msg.includes('字体') || msg.includes('大小') || msg.includes('宽度') || msg.includes('高度') || msg.includes('边框') || msg.includes('对齐')) {
     if (selectedPanel) {
       const styleMatch = userMessage.match(/(?:改为|改成|修改为|设为|设置为|调整|改变)[「"']?([^「"'"」\n]+)/);
       const styleValue = styleMatch?.[1]?.trim();
@@ -615,6 +909,16 @@ function simulateAIResponse(
       } else if (msg.includes('外边距') || msg.includes('margin')) {
         styleField = 'margin';
         styleDescription = '外边距';
+      } else if (msg.includes('对齐') || msg.includes('左对齐') || msg.includes('右对齐') || msg.includes('居中')) {
+        styleField = 'textAlign';
+        styleDescription = '文本对齐';
+        if (msg.includes('左对齐') || msg.includes('左')) {
+          styleValue = 'left';
+        } else if (msg.includes('右对齐') || msg.includes('右')) {
+          styleValue = 'right';
+        } else if (msg.includes('居中') || msg.includes('中心')) {
+          styleValue = 'center';
+        }
       }
       
       if (styleField && styleValue) {
@@ -675,6 +979,7 @@ function simulateAIResponse(
 3. **查看/修改数据源** — 例如 "查看数据源" 或 "修改数据源为 /api/xxx"
 4. **修改样式** — 例如 "修改背景色为蓝色" 或 "调整宽度"
 5. **删除面板** — 例如 "删除这个面板"
+6. **查询网络指标** — 例如 "查看网络指标" 或 "网络指标统计概览"
 
 请描述您的修改需求，预览将实时更新。`,
     };
@@ -692,6 +997,8 @@ function simulateAIResponse(
 - "添加一个图表模块"
 - "添加一个指标卡"
 - "添加一个数据表"
+- "查看网络指标数据"
+- "网络指标统计概览"
 
 注意：「核心结论与风险」和「评估与计划」为固定模块，不可修改。`,
   };

@@ -246,8 +246,13 @@ router.get('/business-systems/overview', async (req: express.Request, res: expre
     });
     
     res.json({ success: true, data: overviewData });
-  } catch (error) {
-    console.error('Failed to fetch business systems overview:', error);
+  } catch (error: any) {
+    const errorMsg = error?.message || '';
+    if (errorMsg.includes('ENOTFOUND') || errorMsg.includes('fetch failed') || errorMsg.includes('ECONNREFUSED')) {
+      console.log('Network unavailable, returning mock data');
+    } else {
+      console.error('Failed to fetch business systems overview:', errorMsg);
+    }
     setConnectionFailed();
     useMockData = true;
     
@@ -2738,6 +2743,455 @@ router.post('/generate-yesterday-data', async (req: express.Request, res: expres
     res.status(500).json({ 
       success: false, 
       error: error.message 
+    });
+  }
+});
+
+/**
+ * 获取网络指标数据
+ * 支持按日期、节点类型、指标类别筛选
+ */
+router.get('/network-metrics', async (req: express.Request, res: express.Response) => {
+  try {
+    const { date, nodeType, metricCategory } = req.query;
+    const reportDate = typeof date === 'string' ? date : new Date().toISOString().split('T')[0];
+    
+    if (shouldUseMockData() || !await ensureConnection()) {
+      return res.json({ success: true, data: [] });
+    }
+    
+    const supabase = getSupabase();
+    let query = supabase!.from('network_metrics').select('*').eq('report_date', reportDate);
+    
+    if (nodeType && typeof nodeType === 'string') {
+      query = query.eq('node_type', nodeType);
+    }
+    if (metricCategory && typeof metricCategory === 'string') {
+      query = query.eq('metric_category', metricCategory);
+    }
+    
+    const { data, error } = await query.order('node_type', { ascending: true });
+    
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (error) {
+    console.error('Failed to fetch network metrics:', error);
+    setConnectionFailed();
+    res.json({ success: true, data: [] });
+  }
+});
+
+/**
+ * 获取网络指标统计信息
+ */
+router.get('/network-metrics/stats', async (req: express.Request, res: express.Response) => {
+  try {
+    const { date } = req.query;
+    const reportDate = typeof date === 'string' ? date : new Date().toISOString().split('T')[0];
+    
+    if (shouldUseMockData() || !await ensureConnection()) {
+      return res.json({ 
+        success: true, 
+        data: {
+          total_metrics: 0,
+          node_types: []
+        }
+      });
+    }
+    
+    const supabase = getSupabase();
+    
+    const { count: total_metrics } = await supabase!
+      .from('network_metrics')
+      .select('*', { count: 'exact', head: true })
+      .eq('report_date', reportDate);
+    
+    const { data: nodeTypesData } = await supabase!
+      .from('network_metrics')
+      .select('node_type')
+      .eq('report_date', reportDate);
+    
+    const node_types = [...new Set(nodeTypesData?.map((item: any) => item.node_type) || [])];
+    
+    res.json({
+      success: true,
+      data: {
+        total_metrics: total_metrics || 0,
+        node_types: node_types
+      }
+    });
+  } catch (error) {
+    console.error('Failed to fetch network metrics stats:', error);
+    setConnectionFailed();
+    res.json({ 
+      success: true, 
+      data: {
+        total_metrics: 0,
+        node_types: []
+      }
+    });
+  }
+});
+
+/**
+ * 批量插入网络指标数据
+ */
+router.post('/network-metrics/batch', async (req: express.Request, res: express.Response) => {
+  try {
+    if (!isUseSupabaseEnabled() || !isDatabaseConnected()) {
+      return res.status(503).json({ 
+        success: false, 
+        error: '数据库未启用或未连接',
+        code: 'DATABASE_UNAVAILABLE' 
+      });
+    }
+
+    const supabaseClient = getSupabase();
+    if (!supabaseClient) {
+      return res.status(503).json({ 
+        success: false, 
+        error: '数据库客户端未初始化',
+        code: 'DATABASE_NOT_INITIALIZED' 
+      });
+    }
+
+    const { metrics } = req.body;
+    if (!metrics || !Array.isArray(metrics)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: '无效的网络指标数据' 
+      });
+    }
+
+    const { error } = await supabaseClient
+      .from('network_metrics')
+      .upsert(metrics, { onConflict: 'report_date,node_type,metric_name' });
+    
+    if (error) {
+      return res.status(500).json({ 
+        success: false, 
+        error: error.message 
+      });
+    }
+
+    res.json({ success: true, data: { count: metrics.length } });
+  } catch (error: any) {
+    console.error('Insert network metrics error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * 生成网络指标模拟数据
+ */
+router.post('/network-metrics/generate', async (req: express.Request, res: express.Response) => {
+  try {
+    if (!isUseSupabaseEnabled() || !isDatabaseConnected()) {
+      return res.status(503).json({ 
+        success: false, 
+        error: '数据库未启用或未连接',
+        code: 'DATABASE_UNAVAILABLE' 
+      });
+    }
+
+    const supabaseClient = getSupabase();
+    if (!supabaseClient) {
+      return res.status(503).json({ 
+        success: false, 
+        error: '数据库客户端未初始化',
+        code: 'DATABASE_NOT_INITIALIZED' 
+      });
+    }
+
+    const { days = 7 } = req.body;
+    const today = new Date();
+    const dates: string[] = [];
+    
+    for (let i = 0; i < days; i++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - i);
+      dates.push(date.toISOString().split('T')[0]);
+    }
+
+    const locations = ['威新机房', '南方机房', '上海机房', '北京机房', '南方快交', '上海快交'];
+    const carriers = ['电信', '联通', '移动'];
+
+    const nodeTypes = [
+      { type: '交易互联网线路', category: '资源使用率', metrics: [{ name: '带宽使用率', unit: '%', warning: 70, critical: 85 }] },
+      { type: '报盘线路', category: '资源使用率', metrics: [{ name: '线路利用率', unit: '%', warning: 70, critical: 85 }] },
+      { type: '行情线路', category: '资源使用率', metrics: [{ name: '线路利用率', unit: '%', warning: 70, critical: 85 }] },
+      { type: '机房互联线路', category: '资源使用率', metrics: [{ name: '互联线路利用率', unit: '%', warning: 70, critical: 85 }] },
+      { type: '快速交易机房互联网线路', category: '资源使用率', metrics: [{ name: '互联网线路', unit: '%', warning: 70, critical: 85 }] },
+      { type: 'DCI线路', category: '资源使用率', metrics: [{ name: '裸纤使用率', unit: '%', warning: 70, critical: 85 }] },
+      { type: '互联网负载均衡', category: '资源使用率', metrics: [{ name: 'CPU利用率', unit: '%', warning: 70, critical: 85 }, { name: '内存利用率', unit: '%', warning: 80, critical: 90 }] },
+      { type: '互联网负载均衡', category: '请求量', metrics: [{ name: '会话数', unit: '万', warning: 100, critical: 150 }, { name: '新建会话数', unit: '万', warning: 50, critical: 80 }, { name: '吞吐量', unit: 'Gb', warning: 100, critical: 150 }] },
+      { type: '互联网防火墙', category: '资源使用率', metrics: [{ name: 'CPU利用率', unit: '%', warning: 70, critical: 85 }, { name: '内存利用率', unit: '%', warning: 80, critical: 90 }] },
+      { type: '互联网防火墙', category: '请求量', metrics: [{ name: '会话数', unit: '万', warning: 100, critical: 150 }, { name: '新建会话数', unit: '万', warning: 50, critical: 80 }, { name: '吞吐量', unit: 'Gb', warning: 100, critical: 150 }] },
+      { type: 'DMZ防火墙', category: '资源使用率', metrics: [{ name: 'CPU利用率', unit: '%', warning: 70, critical: 85 }, { name: '内存利用率', unit: '%', warning: 80, critical: 90 }] },
+      { type: 'DMZ防火墙', category: '请求量', metrics: [{ name: '会话数', unit: '万', warning: 80, critical: 120 }, { name: '新建会话数', unit: '万', warning: 40, critical: 60 }, { name: '吞吐量', unit: 'Gb', warning: 80, critical: 120 }] },
+      { type: '交易内网防火墙', category: '资源使用率', metrics: [{ name: 'CPU利用率', unit: '%', warning: 70, critical: 85 }, { name: '内存利用率', unit: '%', warning: 80, critical: 90 }] },
+      { type: '交易内网防火墙', category: '请求量', metrics: [{ name: '会话数', unit: '万', warning: 60, critical: 100 }, { name: '新建会话数', unit: '万', warning: 30, critical: 50 }, { name: '吞吐量', unit: 'Gb', warning: 60, critical: 100 }] },
+      { type: '交易内网汇聚交换机', category: '资源使用率', metrics: [{ name: 'CPU利用率', unit: '%', warning: 70, critical: 85 }, { name: '内存利用率', unit: '%', warning: 80, critical: 90 }] },
+      { type: '交易内网汇聚交换机', category: '请求量', metrics: [{ name: '包转发率', unit: '万p/s', warning: 500, critical: 800 }, { name: '吞吐量', unit: 'Gb', warning: 80, critical: 120 }] },
+      { type: 'DMZ汇聚交换机', category: '资源使用率', metrics: [{ name: 'CPU利用率', unit: '%', warning: 70, critical: 85 }, { name: '内存利用率', unit: '%', warning: 80, critical: 90 }] },
+      { type: 'DMZ汇聚交换机', category: '请求量', metrics: [{ name: '包转发率', unit: '万p/s', warning: 400, critical: 600 }, { name: '吞吐量', unit: 'Gb', warning: 60, critical: 100 }] },
+      { type: '数据中心核心交换机', category: '资源使用率', metrics: [{ name: 'CPU利用率', unit: '%', warning: 70, critical: 85 }, { name: '内存利用率', unit: '%', warning: 80, critical: 90 }] },
+      { type: '数据中心核心交换机', category: '请求量', metrics: [{ name: '包转发率', unit: '万p/s', warning: 600, critical: 1000 }, { name: '吞吐量', unit: 'Gb', warning: 100, critical: 150 }] },
+    ];
+
+    const generateRandomValue = (min: number, max: number): number => {
+      return Math.round((Math.random() * (max - min) + min) * 100) / 100;
+    };
+
+    const determineHealthStatus = (value: number, warning: number, critical: number): 'healthy' | 'warning' | 'critical' => {
+      if (value >= critical) return 'critical';
+      if (value >= warning) return 'warning';
+      return 'healthy';
+    };
+
+    const generateInsight = (nodeType: string, metricName: string, value: number, healthStatus: string, momChange: number): string => {
+      const trend = momChange > 5 ? '上升' : momChange < -5 ? '下降' : '平稳';
+      const status = healthStatus === 'healthy' ? '正常' : healthStatus === 'warning' ? '需关注' : '告警';
+      
+      if (healthStatus === 'critical') {
+        return `【严重告警】${nodeType}的${metricName}已超过严重阈值，请立即处理。`;
+      } else if (healthStatus === 'warning') {
+        return `【警告】${nodeType}的${metricName}已接近告警阈值，建议关注。`;
+      }
+      return `${nodeType}的${metricName}运行正常，当前值${value}，${trend}趋势。`;
+    };
+
+    let totalInserted = 0;
+
+    for (const date of dates) {
+      const metrics: any[] = [];
+      
+      for (const nodeTypeConfig of nodeTypes) {
+        const { type, category, metrics: metricConfigs } = nodeTypeConfig;
+        
+        for (const metricConfig of metricConfigs) {
+          const { name, unit, warning, critical } = metricConfig;
+          
+          const relevantLocations = type.includes('快交') 
+            ? ['南方快交', '上海快交']
+            : type.includes('数据中心') || type.includes('DMZ')
+            ? ['威新机房', '南方机房', '上海机房']
+            : locations;
+          
+          for (const location of relevantLocations) {
+            let value: number;
+            if (name.includes('CPU')) {
+              value = generateRandomValue(20, 65);
+            } else if (name.includes('内存')) {
+              value = generateRandomValue(30, 70);
+            } else if (name.includes('会话数')) {
+              value = generateRandomValue(20, 80);
+            } else if (name.includes('吞吐量')) {
+              value = generateRandomValue(30, 90);
+            } else if (name.includes('包转发率')) {
+              value = generateRandomValue(100, 500);
+            } else {
+              value = generateRandomValue(20, 70);
+            }
+            
+            const healthStatus = determineHealthStatus(value, warning, critical);
+            const momChange = generateRandomValue(-15, 15);
+            const yoyChange = generateRandomValue(-20, 20);
+            const peak = generateRandomValue(value, critical);
+            
+            metrics.push({
+              report_date: date,
+              node_type: type,
+              metric_category: category,
+              metric_name: `${location}-${name}`,
+              location: location,
+              current_value: value,
+              yoy_change: yoyChange,
+              mom_change: momChange,
+              historical_peak: peak,
+              historical_peak_date: '2025-03-15',
+              unit: unit,
+              threshold_warning: warning,
+              threshold_critical: critical,
+              health_status: healthStatus,
+              insight: generateInsight(type, `${location}-${name}`, value, healthStatus, momChange)
+            });
+          }
+        }
+      }
+      
+      const { error } = await supabaseClient
+        .from('network_metrics')
+        .upsert(metrics, { onConflict: 'report_date,node_type,metric_name' });
+      
+      if (error) {
+        console.error(`插入 ${date} 的网络指标数据失败:`, error.message);
+      } else {
+        totalInserted += metrics.length;
+        console.log(`成功插入 ${date} 的 ${metrics.length} 条网络指标数据`);
+      }
+    }
+
+    res.json({ 
+      success: true, 
+      data: { 
+        message: `成功生成 ${dates.length} 天的网络指标数据`,
+        total_records: totalInserted,
+        dates: dates
+      } 
+    });
+  } catch (error: any) {
+    console.error('Generate network metrics error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+/**
+ * 获取报表模板配置
+ * GET /api/report-templates/:systemId
+ */
+router.get('/report-templates/:systemId', async (req, res) => {
+  try {
+    const { systemId } = req.params;
+    
+    if (isDatabaseConnected()) {
+      const supabase = getSupabase();
+      if (!supabase) {
+        return res.status(503).json({
+          success: false,
+          error: '数据库未连接'
+        });
+      }
+      const { data, error } = await supabase
+        .from('report_templates')
+        .select('*')
+        .eq('business_system_id', systemId)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching report template:', error);
+        return res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+      
+      if (!data) {
+        return res.json({
+          success: true,
+          data: null
+        });
+      }
+      
+      return res.json({
+        success: true,
+        data: {
+          panelOrder: data.panel_order || [],
+          deletedPanels: data.deleted_panels || [],
+          hiddenPanelIds: data.hidden_panel_ids || [],
+          panelModifications: data.panel_modifications || {},
+          deletedPanelTabs: data.deleted_panel_tabs || {},
+          deaggregatedPanels: data.deaggregated_panels || [],
+          savedAt: data.updated_at
+        }
+      });
+    } else {
+      return res.json({
+        success: true,
+        data: null
+      });
+    }
+  } catch (error: any) {
+    console.error('Error fetching report template:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * 保存报表模板配置
+ * POST /api/report-templates/:systemId
+ */
+router.post('/report-templates/:systemId', async (req, res) => {
+  try {
+    const { systemId } = req.params;
+    const {
+      panelOrder,
+      deletedPanels,
+      hiddenPanelIds,
+      panelModifications,
+      deletedPanelTabs,
+      deaggregatedPanels
+    } = req.body;
+    
+    if (isDatabaseConnected()) {
+      const supabase = getSupabase();
+      if (!supabase) {
+        return res.status(503).json({
+          success: false,
+          error: '数据库未连接'
+        });
+      }
+      
+      const templateData = {
+        business_system_id: systemId,
+        panel_order: panelOrder || [],
+        deleted_panels: deletedPanels || [],
+        hidden_panel_ids: hiddenPanelIds || [],
+        panel_modifications: panelModifications || {},
+        deleted_panel_tabs: deletedPanelTabs || {},
+        deaggregated_panels: deaggregatedPanels || [],
+        updated_at: new Date().toISOString()
+      };
+      
+      const { data, error } = await supabase
+        .from('report_templates')
+        .upsert(templateData, {
+          onConflict: 'business_system_id'
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Error saving report template:', error);
+        return res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+      
+      return res.json({
+        success: true,
+        data: {
+          panelOrder: data.panel_order || [],
+          deletedPanels: data.deleted_panels || [],
+          hiddenPanelIds: data.hidden_panel_ids || [],
+          panelModifications: data.panel_modifications || {},
+          deletedPanelTabs: data.deleted_panel_tabs || {},
+          deaggregatedPanels: data.deaggregated_panels || [],
+          savedAt: data.updated_at
+        },
+        message: '模板保存成功'
+      });
+    } else {
+      return res.status(503).json({
+        success: false,
+        error: '数据库未连接'
+      });
+    }
+  } catch (error: any) {
+    console.error('Error saving report template:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

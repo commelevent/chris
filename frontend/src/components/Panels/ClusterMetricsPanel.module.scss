@@ -22,6 +22,41 @@
   background: #f8fafc4d;
 }
 
+.tabWrapper {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.deleteTabButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: -8px;
+  margin-right: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #90a1b9;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+  font-size: 12px;
+
+  &:hover:not(.disabled) {
+    color: #fb2c36;
+    background: #fee2e2;
+  }
+
+  &.disabled {
+    color: #d1d5db;
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
 .tab {
   padding: 16px 32px;
   font-size: 14px;
@@ -46,6 +81,20 @@
   border: none;
   border-bottom: 2px solid #155dfc;
   background: transparent;
+}
+
+.singleTabHeader {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc4d;
+}
+
+.singleTabLabel {
+  font-size: 14px;
+  font-weight: 700;
+  color: #155dfc;
 }
 
 .table {
@@ -260,6 +309,21 @@
   color: #90a1b9;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  text-align: left;
+  border-right: 1px solid #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+
+  &:last-child {
+    border-right: none;
+  }
+}
+
+.tableCell {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #1e293b;
+  vertical-align: middle;
   text-align: left;
   border-right: 1px solid #f1f5f9;
   border-bottom: 1px solid #e2e8f0;

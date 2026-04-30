@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRefresh } from '@/context/RefreshContext';
 
 /**
@@ -47,6 +47,8 @@ export function usePanelData<T>(
   const [error, setError] = useState<string | null>(null);
   const { refreshKey } = useRefresh();
   
+  const requestIdRef = useRef(0);
+  
   const endpoint = datasource?.endpoint;
   const method = datasource?.method;
   const datasourceParams = datasource?.params;
@@ -61,20 +63,28 @@ export function usePanelData<T>(
       return;
     }
 
+    const currentRequestId = ++requestIdRef.current;
+    
     setLoading(true);
     setError(null);
 
     try {
-      const url = new URL(datasource.endpoint, window.location.origin);
+      const cleanEndpoint = datasource.endpoint.replace(/[`「」"']/g, '').trim();
+      const url = new URL(cleanEndpoint, window.location.origin);
       
       const queryParams = { ...params, ...datasource.params };
+      
+      if (cleanEndpoint.includes('/api/network-metrics')) {
+        delete queryParams.systemId;
+      }
+      
       Object.entries(queryParams).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           url.searchParams.append(key, String(value));
         }
       });
 
-      console.log('[usePanelData] Fetching:', url.toString());
+      console.log('[usePanelData] Fetching:', url.toString(), 'requestId:', currentRequestId);
 
       const response = await fetch(url.toString(), {
         method: datasource.method || 'GET',
@@ -89,17 +99,28 @@ export function usePanelData<T>(
 
       const result = await response.json();
       
+      if (currentRequestId !== requestIdRef.current) {
+        console.log('[usePanelData] Stale response ignored, requestId:', currentRequestId, 'current:', requestIdRef.current);
+        return;
+      }
+      
       if (result.success) {
         setData(result.data);
       } else {
         throw new Error(result.error || '获取数据失败');
       }
     } catch (err) {
+      if (currentRequestId !== requestIdRef.current) {
+        console.log('[usePanelData] Stale error ignored, requestId:', currentRequestId);
+        return;
+      }
       const errorMessage = err instanceof Error ? err.message : '获取数据失败';
       setError(errorMessage);
       console.error('Panel data fetch error:', err);
     } finally {
-      setLoading(false);
+      if (currentRequestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [datasourceKey, paramsKey]);
 
